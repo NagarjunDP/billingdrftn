@@ -20,7 +20,7 @@ export async function proxy(req: NextRequest) {
   // Check whitelist for protected pages
   const isAuthRoute = req.nextUrl.pathname.startsWith("/auth");
   if (!isAuthRoute) {
-    const session = await auth0.getSession();
+    const session = await auth0.getSession(req);
     if (!session || !session.user) {
       // Redirect to login if no session exists
       return NextResponse.redirect(new URL("/auth/login", req.url));
