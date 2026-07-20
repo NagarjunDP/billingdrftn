@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { UserProvider } from "@auth0/nextjs-auth0/client";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,10 +8,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <UserProvider>
-      <html lang="en">
-        <body>{children}</body>
-      </html>
-    </UserProvider>
+    <html lang="en">
+      <body>{children}</body>
+    </html>
   );
 }
