@@ -2,6 +2,7 @@
 
 import { ChangeEvent, KeyboardEvent, useMemo, useRef, useState, useEffect } from "react";
 import Image from "next/image";
+import { UserButton } from "@clerk/nextjs";
 import { isValidIndianMobile, normalizeIndianPhone } from "@/lib/domain/phone";
 
 type Item = {
@@ -322,7 +323,10 @@ export function BillingApp() {
 
   return (
     <main className="page">
-      <h1>DRFTN Billing Counter</h1>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1.5rem", flexWrap: "wrap", gap: "1rem" }}>
+        <h1 style={{ margin: 0 }}>DRFTN Billing Counter</h1>
+        <UserButton />
+      </div>
       <div className="actions">
         <button onClick={createNewSale} disabled={isLoading}>New Sale</button>
         <button onClick={loadAdminInvoices}>Refresh Admin List</button>

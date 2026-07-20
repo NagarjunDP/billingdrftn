@@ -1,12 +1,19 @@
-import { auth0 } from "@/lib/auth0";
+import { auth, currentUser } from "@clerk/nextjs/server";
 
 const ALLOWED_EMAILS = ["drftnclothing@gmail.com", "nagarjundp256@gmail.com"];
 
 export async function requireUserId() {
-  const session = await auth0.getSession();
-  const user = session?.user;
-  if (!user || !user.email || !ALLOWED_EMAILS.includes(user.email)) {
+  const { userId } = await auth();
+  if (!userId) {
     throw new Error("Unauthorized");
   }
-  return user.sub;
+
+  const user = await currentUser();
+  const email = user?.emailAddresses?.[0]?.emailAddress;
+
+  if (!email || !ALLOWED_EMAILS.includes(email)) {
+    throw new Error("Unauthorized");
+  }
+
+  return userId;
 }
