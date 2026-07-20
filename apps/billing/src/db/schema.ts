@@ -58,3 +58,11 @@ export const purchaseLogs = pgTable("purchase_logs", {
   purchaseDate: timestamp("purchase_date", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+export const quickProducts = pgTable("quick_products", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  code: text("code").unique().notNull(),
+  name: text("name").notNull(),
+  price: numeric("price", { precision: 12, scale: 2 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

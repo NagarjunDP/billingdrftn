@@ -14,7 +14,7 @@
     "db:seed": "tsx src/db/seed.ts"
   },
   "dependencies": {
-    "@clerk/nextjs": "7.5.20",
+    "@auth0/nextjs-auth0": "^3.8.0",
     "@supabase/supabase-js": "2.110.7",
     "drizzle-orm": "0.45.2",
     "next": "16.2.10",

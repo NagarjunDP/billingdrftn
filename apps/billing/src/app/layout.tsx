@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { ClerkProvider } from "@clerk/nextjs";
+import { UserProvider } from "@auth0/nextjs-auth0/client";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -9,10 +9,10 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <ClerkProvider>
+    <UserProvider>
       <html lang="en">
         <body>{children}</body>
       </html>
-    </ClerkProvider>
+    </UserProvider>
   );
 }
