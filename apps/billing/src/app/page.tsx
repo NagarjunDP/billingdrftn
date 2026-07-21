@@ -1,6 +1,5 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { BillingApp } from "@/components/billing-app";
 
 const ALLOWED_EMAILS = ["drftnclothing@gmail.com", "nagarjundp256@gmail.com"];
 
@@ -29,5 +28,5 @@ export default async function Home() {
     );
   }
 
-  return <BillingApp />;
+  redirect("/sale");
 }

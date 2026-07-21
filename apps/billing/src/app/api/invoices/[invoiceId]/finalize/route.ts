@@ -1,52 +1,134 @@
-import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
+import { NextResponse } from "next/server";
+import { db } from "@/db/client";
+import { invoices, storeSettings, invoiceAuditLog } from "@/db/schema";
 import { requireUserId } from "@/lib/server/auth";
-import { buildInvoicePdf } from "@/lib/server/pdf";
-import { uploadBufferToStorage } from "@/lib/storage";
-import { finalizeInvoicePayment, getInvoiceWithItems } from "@/lib/repos/invoices";
+import {
+  formatInvoiceNumber,
+  getFinancialYear,
+  isInterStateTransaction,
+} from "@/lib/domain/gst";
+import { recalculateInvoiceTotals } from "@/lib/server/invoice-totals";
 import { isValidIndianMobile, normalizeIndianPhone } from "@/lib/domain/phone";
-import { sql } from "@/db/client";
+import { eq } from "drizzle-orm";
 
-const finalizeSchema = z.object({
-  customerPhone: z.string().min(10),
-  customerName: z.string().optional(),
-});
-
-export async function POST(req: NextRequest, { params }: { params: Promise<{ invoiceId: string }> }) {
+export async function POST(
+  request: Request,
+  { params }: { params: Promise<{ invoiceId: string }> }
+) {
   try {
     await requireUserId();
     const { invoiceId } = await params;
-    const body = finalizeSchema.parse(await req.json());
-    const customerPhone = normalizeIndianPhone(body.customerPhone);
+    const body = await request.json();
 
-    if (!isValidIndianMobile(customerPhone)) {
-      return NextResponse.json({ error: "Invalid phone" }, { status: 400 });
+    const {
+      buyerName,
+      buyerPhone,
+      buyerEmail,
+      buyerGstin,
+      buyerState,
+      buyerStateCode,
+      paymentMode = "upi",
+    } = body;
+
+    const normalizedPhone = buyerPhone ? normalizeIndianPhone(buyerPhone) : "";
+    if (buyerPhone && !isValidIndianMobile(normalizedPhone)) {
+      return NextResponse.json({ error: "Invalid 10-digit mobile number" }, { status: 400 });
     }
 
-    const finalized = await finalizeInvoicePayment(invoiceId, customerPhone, body.customerName);
-    const { invoice, items } = await getInvoiceWithItems(invoiceId);
-
-    const pdfBytes = await buildInvoicePdf({
-      businessName: process.env.BUSINESS_NAME ?? "DRFTN Clothing",
-      gstin: process.env.BUSINESS_GSTIN ?? "GSTIN_PENDING",
-      invoiceNumber: finalized.invoice_number,
-      financialYear: finalized.financial_year,
-      customerName: invoice.customer_name,
-      customerPhone,
-      invoiceDateIso: finalized.paid_at,
-      subtotal: invoice.subtotal,
-      totalCgst: invoice.total_cgst,
-      totalSgst: invoice.total_sgst,
-      grandTotal: invoice.grand_total,
-      items,
+    const inv = await db.query.invoices.findFirst({
+      where: eq(invoices.id, invoiceId),
     });
 
-    const pdfPath = `invoices/${finalized.financial_year}/${finalized.invoice_number}.pdf`;
-    const pdfUrl = await uploadBufferToStorage(pdfPath, pdfBytes, "application/pdf");
+    if (!inv) {
+      return NextResponse.json({ error: "Invoice not found" }, { status: 404 });
+    }
 
-    await sql`UPDATE invoices SET pdf_url = ${pdfUrl} WHERE id = ${invoiceId}`;
-    return NextResponse.json({ ok: true, invoiceNumber: finalized.invoice_number, pdfUrl });
-  } catch (error) {
-    return NextResponse.json({ error: (error as Error).message }, { status: 400 });
+    if (inv.status === "paid" || inv.status === "sent") {
+      return NextResponse.json({ invoice: inv, alreadyFinalized: true });
+    }
+
+    // Get store settings
+    let settings = await db.query.storeSettings.findFirst();
+    if (!settings) {
+      const [inserted] = await db
+        .insert(storeSettings)
+        .values({
+          storeName: "DRFTN Clothing",
+          legalName: "DRFTN Clothing",
+          state: "Karnataka",
+          stateCode: "29",
+          invoicePrefix: "DRFTN",
+          currentFY: "25-26",
+          currentSequence: 0,
+        })
+        .returning();
+      settings = inserted;
+    }
+
+    const sellerState = settings.state || "Karnataka";
+    const targetBuyerState = buyerState || sellerState;
+    const isInterState = isInterStateTransaction(sellerState, targetBuyerState);
+
+    // Auto-increment sequence per FY
+    const currentFY = settings.currentFY || getFinancialYear(new Date());
+    const nextSeq = (settings.currentSequence || 0) + 1;
+    const invoiceNumberStr = formatInvoiceNumber(
+      settings.invoicePrefix || "DRFTN",
+      currentFY,
+      nextSeq
+    );
+
+    // Update settings sequence
+    await db
+      .update(storeSettings)
+      .set({
+        currentSequence: nextSeq,
+        updatedAt: new Date(),
+      })
+      .where(eq(storeSettings.id, settings.id));
+
+    // Update invoice with buyer details & inter-state setting
+    await db
+      .update(invoices)
+      .set({
+        buyerName: buyerName ? String(buyerName).trim() : null,
+        buyerPhone: normalizedPhone || null,
+        buyerEmail: buyerEmail ? String(buyerEmail).trim() : null,
+        buyerGstin: buyerGstin ? String(buyerGstin).trim().toUpperCase() : null,
+        buyerState: targetBuyerState,
+        buyerStateCode: buyerStateCode || (targetBuyerState === "Karnataka" ? "29" : ""),
+        isInterState,
+        paymentMode: paymentMode || "upi",
+        invoiceNumber: invoiceNumberStr,
+        sequence: nextSeq,
+        financialYear: currentFY,
+        status: "paid",
+        paidAt: new Date(),
+      })
+      .where(eq(invoices.id, invoiceId));
+
+    // Recalculate totals with inter-state logic
+    const recalcResult = await recalculateInvoiceTotals(invoiceId);
+
+    // Audit log
+    await db.insert(invoiceAuditLog).values({
+      invoiceId,
+      eventType: "invoice_finalized",
+      newValue: {
+        invoiceNumber: invoiceNumberStr,
+        buyerPhone: normalizedPhone,
+        grandTotalPaise: recalcResult?.invoice?.grandTotalPaise,
+        paymentMode,
+      },
+    });
+
+    return NextResponse.json({
+      success: true,
+      invoice: recalcResult?.invoice,
+      items: recalcResult?.items,
+    });
+  } catch (err: unknown) {
+    const msg = err instanceof Error ? err.message : "Failed to finalize invoice";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
